@@ -1,0 +1,30 @@
+Drivers get two objects:
+The USB device, and the abstracted "input device".
+The "input device" interface translates high-level input calls into low-level
+events. Either for the uinput interface or the X11 interface, or maybe even
+uhid?
+
+Plan:
+    Implement listening to hotplug events
+    Grab and open the device
+    Print events
+    Do basic decoding
+    Create uinput devices imitating a Wacom tablet
+    Start sending events
+    Create X11 driver
+    Start sending events
+
+Design:
+    A library driven by either:
+        a standalone daemon
+            mapping USB devices it discovers to uinput devices
+        an X11 driver
+            mapping USB devices X11 discovers to xinput devices
+    Therefore the discovery and the mapping should be separate
+    The library should provide a way of connecting a driver to the USB device,
+    supplying it with an abstract interface to the underlying device
+        Let's call them "USB driver", and "input driver".
+    We need to separate things like "device" from "driver" and from "system".
+    A "USB system" provides interface for creating/handling/destroying
+    USB devices with the help of "USB drivers", connecting them to "input
+    devices" managed by "input system", with the help of "input drivers".
