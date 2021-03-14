@@ -3,6 +3,13 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <linux/uinput.h>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpacked"
 #include <libusb.h>
@@ -19,8 +26,11 @@
 #define GENERIC_FAILURE(_fmt, _args...) \
     GENERIC_ERROR("Failed to " _fmt, ##_args)
 
-#define LIBUSB_FAILURE(_fmt, _args...) \
-    GENERIC_FAILURE(_fmt ": %s", ##_args, libusb_strerror(err))
+#define LIBUSB_FAILURE(_err, _fmt, _args...) \
+    GENERIC_FAILURE(_fmt ": %s", ##_args, libusb_strerror(_err))
+
+#define LIBC_FAILURE(_errno, _fmt, _args...) \
+    GENERIC_FAILURE(_fmt ": %s", ##_args, strerror(_errno))
 
 #define ERROR_CLEANUP(_fmt, _args...) \
     do {                                \
@@ -34,41 +44,103 @@
         goto cleanup;                   \
     } while (0)
 
-#define LIBUSB_FAILURE_CLEANUP(_fmt, _args...) \
-    do {                                        \
-        LIBUSB_FAILURE(_fmt, ##_args);          \
-        goto cleanup;                           \
+#define LIBUSB_FAILURE_CLEANUP(_err, _fmt, _args...) \
+    do {                                                \
+        LIBUSB_FAILURE(_err, _fmt, ##_args);            \
+        goto cleanup;                                   \
+    } while (0)
+
+#define LIBC_FAILURE_CLEANUP(_errno, _fmt, _args...) \
+    do {                                                \
+        LIBC_FAILURE(_errno, _fmt, ##_args);            \
+        goto cleanup;                                   \
     } while (0)
 
 #define LIBUSB_GUARD(_expr, _fmt, _args...) \
-    do {                                            \
-        err = _expr;                                \
-        if (err != LIBUSB_SUCCESS)                  \
-            LIBUSB_FAILURE_CLEANUP(_fmt, ##_args);  \
+    do {                                                    \
+        enum libusb_error _err = _expr;                     \
+        if (_err != LIBUSB_SUCCESS)                         \
+            LIBUSB_FAILURE_CLEANUP(_err, _fmt, ##_args);    \
     } while (0)
 
+#define LIBC_GUARD(_expr, _fmt, _args...) \
+    do {                                                \
+        int _rc = _expr;                                \
+        if (_rc < 0)                                    \
+            LIBC_FAILURE_CLEANUP(errno, _fmt, ##_args); \
+    } while (0)
+
+
+static void
+send(int fd, uint16_t type, uint16_t code, int32_t value)
+{
+    struct input_event ev = {.type = type, .code = code, .value = value};
+    if (write(fd, &ev, sizeof(ev)) < 0) {
+        LIBC_FAILURE(errno, "write event");
+    }
+}
+
+static void
+translate(int fd, const uint8_t *buf, size_t len)
+{
+    if (len < 12) {
+        return;
+    }
+    if (buf[0] != 8) {
+        return;
+    }
+    if (buf[1] & 0x80) {
+        send(fd, EV_ABS, ABS_X,
+             (int32_t)buf[2] |
+             ((int32_t)buf[3] << 8) |
+             ((int32_t)buf[8] << 16));
+        send(fd, EV_ABS, ABS_Y,
+             (int32_t)buf[4] |
+             ((int32_t)buf[5] << 8) |
+             ((int32_t)buf[9] << 16));
+        send(fd, EV_ABS, ABS_PRESSURE,
+             (int32_t)buf[6] | ((int32_t)buf[7] << 8));
+        send(fd, EV_ABS, ABS_TILT_X, (int8_t)buf[10]);
+        send(fd, EV_ABS, ABS_TILT_Y, -(int8_t)buf[11]);
+        send(fd, EV_KEY, BTN_TOOL_PEN, 1);
+        send(fd, EV_KEY, BTN_TOUCH, (buf[1] & 1) != 0);
+        send(fd, EV_KEY, BTN_STYLUS, (buf[1] & 2) != 0);
+        send(fd, EV_KEY, BTN_STYLUS2, (buf[1] & 4) != 0);
+    } else {
+        send(fd, EV_KEY, BTN_TOOL_PEN, 0);
+    }
+    send(fd, EV_MSC, MSC_SERIAL, 1098942556);
+    send(fd, EV_SYN, SYN_REPORT, 1);
+}
 
 static void LIBUSB_CALL
 interrupt_transfer_cb(struct libusb_transfer *transfer)
 {
     enum libusb_error err;
-    int idx;
+    int uinput_fd;
 
     assert(transfer != NULL);
+    assert(transfer->user_data != NULL);
+
+    uinput_fd = *(const int *)transfer->user_data;
 
     switch (transfer->status)
     {
         case LIBUSB_TRANSFER_COMPLETED:
+#if 0
             /* Dump the result */
-            for (idx = 0; idx < transfer->actual_length; idx++) {
+            for (int idx = 0; idx < transfer->actual_length; idx++) {
                 fprintf(stderr, "%s%02hhx", (idx == 0 ? "" : " "),
                         transfer->buffer[idx]);
             }
             fprintf(stderr, "\n");
+#endif
+            /* Translate */
+            translate(uinput_fd, transfer->buffer, transfer->actual_length);
             /* Resubmit the transfer */
             err = libusb_submit_transfer(transfer);
             if (err != LIBUSB_SUCCESS) {
-                LIBUSB_FAILURE("resubmit a transfer");
+                LIBUSB_FAILURE(err, "resubmit a transfer");
             }
             break;
 
@@ -116,6 +188,10 @@ main(void)
     struct libusb_transfer *transfer = NULL;
     uint8_t *buf = NULL;
     size_t len = 0;
+    int uinput_fd = -1;
+    struct uinput_abs_setup uinput_abs_setup;
+    struct uinput_setup uinput_setup;
+    bool device_created = false;
 
     /* Create libusb context */
     LIBUSB_GUARD(libusb_init(&ctx), "create libusb context");
@@ -130,7 +206,7 @@ main(void)
     /* Retrieve libusb device list */
     num = libusb_get_device_list(ctx, &lusb_list);
     if (num == LIBUSB_ERROR_NO_MEM) {
-        LIBUSB_FAILURE_CLEANUP("retrieve device list");
+        LIBUSB_FAILURE_CLEANUP(num, "retrieve device list");
     }
 
     /* Find and open the devices */
@@ -156,7 +232,7 @@ main(void)
         if (err == LIBUSB_SUCCESS) {
             iface0_detached = true;
         } else if (err != LIBUSB_ERROR_NOT_FOUND) {
-            LIBUSB_FAILURE_CLEANUP("detach kernel driver from interface #0");
+            LIBUSB_FAILURE_CLEANUP(err, "detach kernel driver from interface #0");
         }
 
         /* Detach interface 1 */
@@ -164,7 +240,7 @@ main(void)
         if (err == LIBUSB_SUCCESS) {
             iface1_detached = true;
         } else if (err != LIBUSB_ERROR_NOT_FOUND) {
-            LIBUSB_FAILURE_CLEANUP("detach kernel driver from interface #1");
+            LIBUSB_FAILURE_CLEANUP(err, "detach kernel driver from interface #1");
         }
 
         /* Claim interface 0 */
@@ -191,7 +267,7 @@ main(void)
             sizeof(data)
         );
         if (rc < 0) {
-            LIBUSB_FAILURE_CLEANUP("get configuration string descriptor");
+            LIBUSB_FAILURE_CLEANUP(err, "get configuration string descriptor");
         }
         fprintf(stderr, "Got %d configuration bytes:\n", rc);
         for (idx = 0; idx < rc; idx++) {
@@ -214,7 +290,7 @@ main(void)
                                      /* timeout */
                                      1000);
         if (rc != LIBUSB_SUCCESS && rc != LIBUSB_ERROR_PIPE) {
-            LIBUSB_FAILURE_CLEANUP("set report protocol on interface 0");
+            LIBUSB_FAILURE_CLEANUP(err, "set report protocol on interface 0");
         }
 
         /* Set report protocol on interface 1 */
@@ -232,7 +308,7 @@ main(void)
                                      /* timeout */
                                      1000);
         if (rc != LIBUSB_SUCCESS && rc != LIBUSB_ERROR_PIPE) {
-            LIBUSB_FAILURE_CLEANUP("set report protocol on interface 1");
+            LIBUSB_FAILURE_CLEANUP(err, "set report protocol on interface 1");
         }
 
         /* Set infinite idle duration on interface 0 */
@@ -250,7 +326,7 @@ main(void)
                                      /* timeout */
                                      1000);
         if (rc != LIBUSB_SUCCESS && rc != LIBUSB_ERROR_PIPE) {
-            LIBUSB_FAILURE_CLEANUP("set infinite idle on interface 0");
+            LIBUSB_FAILURE_CLEANUP(err, "set infinite idle on interface 0");
         }
 
         /* Set infinite idle duration on interface 1 */
@@ -268,8 +344,152 @@ main(void)
                                      /* timeout */
                                      1000);
         if (rc != LIBUSB_SUCCESS && rc != LIBUSB_ERROR_PIPE) {
-            LIBUSB_FAILURE_CLEANUP("set infinite idle on interface 1");
+            LIBUSB_FAILURE_CLEANUP(err, "set infinite idle on interface 1");
         }
+
+        /* Open uinput */
+        uinput_fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
+        if (uinput_fd < 0) {
+            LIBC_FAILURE_CLEANUP(errno, "open /dev/uinput");
+        }
+
+#define SET_EVBIT(_bit_token) \
+    LIBC_GUARD(ioctl(uinput_fd, UI_SET_EVBIT, _bit_token),  \
+               "enable uinput %s", #_bit_token)
+        SET_EVBIT(EV_SYN);
+        SET_EVBIT(EV_KEY);
+        SET_EVBIT(EV_REL);
+        SET_EVBIT(EV_ABS);
+        SET_EVBIT(EV_MSC);
+#undef SET_EVBIT
+
+#define SET_KEYBIT(_bit_token) \
+    LIBC_GUARD(ioctl(uinput_fd, UI_SET_KEYBIT, _bit_token),  \
+               "enable uinput %s", #_bit_token)
+        SET_KEYBIT(BTN_LEFT);
+        SET_KEYBIT(BTN_RIGHT);
+        SET_KEYBIT(BTN_MIDDLE);
+        SET_KEYBIT(BTN_SIDE);
+        SET_KEYBIT(BTN_EXTRA);
+        SET_KEYBIT(BTN_TOOL_PEN);
+        SET_KEYBIT(BTN_TOOL_RUBBER);
+        SET_KEYBIT(BTN_TOOL_BRUSH);
+        SET_KEYBIT(BTN_TOOL_PENCIL);
+        SET_KEYBIT(BTN_TOOL_AIRBRUSH);
+        SET_KEYBIT(BTN_TOOL_MOUSE);
+        SET_KEYBIT(BTN_TOOL_LENS);
+        SET_KEYBIT(BTN_TOUCH);
+        SET_KEYBIT(BTN_STYLUS);
+        SET_KEYBIT(BTN_STYLUS2);
+#undef SET_KEYBIT
+
+#define SET_ABSBIT(_bit_token) \
+    LIBC_GUARD(ioctl(uinput_fd, UI_SET_ABSBIT, _bit_token),  \
+               "enable uinput %s", #_bit_token)
+        SET_ABSBIT(ABS_X);
+        SET_ABSBIT(ABS_Y);
+        SET_ABSBIT(ABS_Z);
+        SET_ABSBIT(ABS_RZ);
+        SET_ABSBIT(ABS_THROTTLE);
+        SET_ABSBIT(ABS_WHEEL);
+        SET_ABSBIT(ABS_PRESSURE);
+        SET_ABSBIT(ABS_DISTANCE);
+        SET_ABSBIT(ABS_TILT_X);
+        SET_ABSBIT(ABS_TILT_Y);
+        SET_ABSBIT(ABS_MISC);
+#undef SET_ABSBIT
+
+#define SET_RELBIT(_bit_token) \
+    LIBC_GUARD(ioctl(uinput_fd, UI_SET_RELBIT, _bit_token),  \
+               "enable uinput %s", #_bit_token)
+        SET_RELBIT(REL_WHEEL);
+#undef SET_RELBIT
+
+#define SET_MSCBIT(_bit_token) \
+    LIBC_GUARD(ioctl(uinput_fd, UI_SET_MSCBIT, _bit_token),  \
+               "enable uinput %s", #_bit_token)
+        SET_MSCBIT(MSC_SERIAL);
+#undef SET_MSCBIT
+
+        /* Setup X axis */
+        uinput_abs_setup = (struct uinput_abs_setup){
+            .code = ABS_X,
+            .absinfo = {
+                .value = 0,
+                .minimum = 0,
+                .maximum = 50800,
+                .resolution = 200,
+            },
+        };
+        LIBC_GUARD(ioctl(uinput_fd, UI_ABS_SETUP, &uinput_abs_setup),
+                   "setup X axis");
+
+        /* Setup Y axis */
+        uinput_abs_setup = (struct uinput_abs_setup){
+            .code = ABS_Y,
+            .absinfo = {
+                .value = 0,
+                .minimum = 0,
+                .maximum = 31750,
+                .resolution = 200,
+            },
+        };
+        LIBC_GUARD(ioctl(uinput_fd, UI_ABS_SETUP, &uinput_abs_setup),
+                   "setup Y axis");
+
+        /* Setup pressure axis */
+        uinput_abs_setup = (struct uinput_abs_setup){
+            .code = ABS_PRESSURE,
+            .absinfo = {
+                .value = 0,
+                .minimum = 0,
+                .maximum = 8191,
+            },
+        };
+        LIBC_GUARD(ioctl(uinput_fd, UI_ABS_SETUP, &uinput_abs_setup),
+                   "setup pressure axis");
+
+        /* Setup tilt X axis */
+        uinput_abs_setup = (struct uinput_abs_setup){
+            .code = ABS_TILT_X,
+            .absinfo = {
+                .value = 0,
+                .minimum = -60,
+                .maximum = 60,
+            },
+        };
+        LIBC_GUARD(ioctl(uinput_fd, UI_ABS_SETUP, &uinput_abs_setup),
+                   "setup tilt X axis");
+
+        /* Setup tilt Y axis */
+        uinput_abs_setup = (struct uinput_abs_setup){
+            .code = ABS_TILT_Y,
+            .absinfo = {
+                .value = 0,
+                .minimum = -60,
+                .maximum = 60,
+            },
+        };
+        LIBC_GUARD(ioctl(uinput_fd, UI_ABS_SETUP, &uinput_abs_setup),
+                   "setup tilt Y axis");
+
+        /* Setup uinput device */
+        /* Pose as 056a:0314 Wacom Co., Ltd PTH-451 [Intuos pro (S)] */
+        uinput_setup = (struct uinput_setup){
+            .id = {
+                .bustype = BUS_USB,
+                .vendor = 0x056a,
+                .product = 0x0314,
+                .version = 0x0110,
+            },
+            .name = "Wacom Intuos Pro S Pen",
+        };
+        LIBC_GUARD(ioctl(uinput_fd, UI_DEV_SETUP, &uinput_setup),
+                   "setup uinput device");
+
+        /* Create uinput device */
+        LIBC_GUARD(ioctl(uinput_fd, UI_DEV_CREATE), "create uinput device");
+        device_created = true;
 
         /* Allocate transfer buffer */
         len = 0x40;
@@ -288,11 +508,12 @@ main(void)
                                        buf, len,
                                        interrupt_transfer_cb,
                                        /* Callback data */
-                                       NULL,
+                                       &uinput_fd,
                                        /* Timeout */
                                        0);
-        fprintf(stderr, "Starting transfers!\n");
+
         /* Submit first transfer */
+        fprintf(stderr, "Starting transfers!\n");
         LIBUSB_GUARD(libusb_submit_transfer(transfer),
                      "submit a transfer");
 
@@ -300,12 +521,20 @@ main(void)
         while (true) {
             err = libusb_handle_events(ctx);
             if (err != LIBUSB_SUCCESS && err != LIBUSB_ERROR_INTERRUPTED)
-                LIBUSB_FAILURE_CLEANUP("handle transfer events");
+                LIBUSB_FAILURE_CLEANUP(err, "handle transfer events");
         }
     }
 
     result = 0;
 cleanup:
+
+    if (device_created) {
+        ioctl(uinput_fd, UI_DEV_DESTROY);
+    }
+
+    if (uinput_fd >= 0) {
+        close(uinput_fd);
+    }
 
     libusb_free_transfer(transfer);
 
