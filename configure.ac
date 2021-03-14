@@ -30,6 +30,11 @@ AC_ARG_ENABLE(
     [], [enable_tests_install="no"])
 
 #
+# Checks for library functions.
+#
+AC_CHECK_FUNCS(libusb_set_option)
+
+#
 # Output
 #
 AC_CONFIG_FILES([Makefile
