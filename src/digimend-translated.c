@@ -71,48 +71,6 @@
     } while (0)
 
 
-static void
-send(int fd, uint16_t type, uint16_t code, int32_t value)
-{
-    struct input_event ev = {.type = type, .code = code, .value = value};
-    if (write(fd, &ev, sizeof(ev)) < 0) {
-        LIBC_FAILURE(errno, "write event");
-    }
-}
-
-static void
-translate(int fd, const uint8_t *buf, size_t len)
-{
-    if (len < 12) {
-        return;
-    }
-    if (buf[0] != 8) {
-        return;
-    }
-    if (buf[1] & 0x80) {
-        send(fd, EV_ABS, ABS_X,
-             (int32_t)buf[2] |
-             ((int32_t)buf[3] << 8) |
-             ((int32_t)buf[8] << 16));
-        send(fd, EV_ABS, ABS_Y,
-             (int32_t)buf[4] |
-             ((int32_t)buf[5] << 8) |
-             ((int32_t)buf[9] << 16));
-        send(fd, EV_ABS, ABS_PRESSURE,
-             (int32_t)buf[6] | ((int32_t)buf[7] << 8));
-        send(fd, EV_ABS, ABS_TILT_X, (int8_t)buf[10]);
-        send(fd, EV_ABS, ABS_TILT_Y, -(int8_t)buf[11]);
-        send(fd, EV_KEY, BTN_TOOL_PEN, 1);
-        send(fd, EV_KEY, BTN_TOUCH, (buf[1] & 1) != 0);
-        send(fd, EV_KEY, BTN_STYLUS, (buf[1] & 2) != 0);
-        send(fd, EV_KEY, BTN_STYLUS2, (buf[1] & 4) != 0);
-    } else {
-        send(fd, EV_KEY, BTN_TOOL_PEN, 0);
-    }
-    send(fd, EV_MSC, MSC_SERIAL, 1098942556);
-    send(fd, EV_SYN, SYN_REPORT, 1);
-}
-
 /**
  * Destroy a uinput device.
  *
@@ -126,6 +84,7 @@ uinput_destroy(int fd)
         close(fd);
     }
 }
+
 
 /**
  * Create a uinput pen device.
@@ -295,6 +254,7 @@ cleanup:
     return result;
 }
 
+
 /**
  * Create a uinput pad device.
  *
@@ -414,6 +374,64 @@ cleanup:
 
     return result;
 }
+
+
+/**
+ * Send an event through a uinput device.
+ *
+ * @param fd    The file descriptor of the device to send the event through.
+ * @param type  The type of the event to send. One of EV_<TYPE> macros.
+ * @param type  The code of the event to send. One of the <TYPE>_<CODE>
+ *              macros.
+ * @param value The event value to send.
+ *
+ * @return Zero on success, -1 on failure, with errno set appropriately.
+ */
+static int
+uinput_send(int fd, uint16_t type, uint16_t code, int32_t value)
+{
+    struct input_event ev = {.type = type, .code = code, .value = value};
+    if (write(fd, &ev, sizeof(ev)) < 0) {
+        LIBC_FAILURE(errno, "write event");
+        return -1;
+    }
+    return 0;
+}
+
+
+static void
+translate(int fd, const uint8_t *buf, size_t len)
+{
+    if (len < 12) {
+        return;
+    }
+    if (buf[0] != 8) {
+        return;
+    }
+    if (buf[1] & 0x80) {
+        uinput_send(fd, EV_ABS, ABS_X,
+                    (int32_t)buf[2] |
+                    ((int32_t)buf[3] << 8) |
+                    ((int32_t)buf[8] << 16));
+        uinput_send(fd, EV_ABS, ABS_Y,
+                    (int32_t)buf[4] |
+                    ((int32_t)buf[5] << 8) |
+                    ((int32_t)buf[9] << 16));
+        uinput_send(fd, EV_ABS, ABS_PRESSURE,
+                    (int32_t)buf[6] | ((int32_t)buf[7] << 8));
+        uinput_send(fd, EV_ABS, ABS_TILT_X, (int8_t)buf[10]);
+        uinput_send(fd, EV_ABS, ABS_TILT_Y, -(int8_t)buf[11]);
+        uinput_send(fd, EV_KEY, BTN_TOOL_PEN, 1);
+        uinput_send(fd, EV_KEY, BTN_TOUCH, (buf[1] & 1) != 0);
+        uinput_send(fd, EV_KEY, BTN_STYLUS, (buf[1] & 2) != 0);
+        uinput_send(fd, EV_KEY, BTN_STYLUS2, (buf[1] & 4) != 0);
+    } else {
+        uinput_send(fd, EV_KEY, BTN_TOOL_PEN, 0);
+    }
+    uinput_send(fd, EV_MSC, MSC_SERIAL, 1098942556);
+    uinput_send(fd, EV_SYN, SYN_REPORT, 1);
+}
+
 
 static void LIBUSB_CALL
 interrupt_transfer_cb(struct libusb_transfer *transfer)
