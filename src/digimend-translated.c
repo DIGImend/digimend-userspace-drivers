@@ -295,6 +295,126 @@ cleanup:
     return result;
 }
 
+/**
+ * Create a uinput pad device.
+ *
+ * @return The file descriptor of the created device, or -1 on failure.
+ */
+static int
+uinput_create_pad(void)
+{
+    int result = -1;
+    int fd = -1;
+    struct uinput_abs_setup uinput_abs_setup;
+    struct uinput_setup uinput_setup;
+
+    /* Open the file */
+    fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
+    if (fd < 0) {
+        LIBC_FAILURE_CLEANUP(errno, "open /dev/uinput");
+    }
+
+#define SET_EVBIT(_bit_token) \
+LIBC_GUARD(ioctl(fd, UI_SET_EVBIT, _bit_token),  \
+           "enable uinput %s", #_bit_token)
+    SET_EVBIT(EV_SYN);
+    SET_EVBIT(EV_KEY);
+    SET_EVBIT(EV_ABS);
+#undef SET_EVBIT
+
+#define SET_KEYBIT(_bit_token) \
+LIBC_GUARD(ioctl(fd, UI_SET_KEYBIT, _bit_token),  \
+           "enable uinput %s", #_bit_token)
+    SET_KEYBIT(BTN_0);
+    SET_KEYBIT(BTN_1);
+    SET_KEYBIT(BTN_2);
+    SET_KEYBIT(BTN_3);
+    SET_KEYBIT(BTN_4);
+    SET_KEYBIT(BTN_5);
+    SET_KEYBIT(BTN_6);
+    SET_KEYBIT(BTN_7);
+    SET_KEYBIT(BTN_8);
+    SET_KEYBIT(BTN_9);
+    SET_KEYBIT(BTN_A);
+    SET_KEYBIT(BTN_B);
+    SET_KEYBIT(BTN_C);
+    SET_KEYBIT(BTN_STYLUS);
+#undef SET_KEYBIT
+
+#define SET_ABSBIT(_bit_token) \
+LIBC_GUARD(ioctl(fd, UI_SET_ABSBIT, _bit_token),  \
+           "enable uinput %s", #_bit_token)
+    SET_ABSBIT(ABS_X);
+    SET_ABSBIT(ABS_Y);
+    SET_ABSBIT(ABS_WHEEL);
+    SET_ABSBIT(ABS_MISC);
+#undef SET_ABSBIT
+
+    /* Setup X axis */
+    uinput_abs_setup = (struct uinput_abs_setup){
+        .code = ABS_X,
+        .absinfo = {
+            .value = 0,
+            .minimum = 0,
+            .maximum = 1,
+        },
+    };
+    LIBC_GUARD(ioctl(fd, UI_ABS_SETUP, &uinput_abs_setup),
+               "setup X axis");
+
+    /* Setup Y axis */
+    uinput_abs_setup = (struct uinput_abs_setup){
+        .code = ABS_Y,
+        .absinfo = {
+            .value = 0,
+            .minimum = 0,
+            .maximum = 1,
+        },
+    };
+    LIBC_GUARD(ioctl(fd, UI_ABS_SETUP, &uinput_abs_setup),
+               "setup Y axis");
+
+    /* Setup absolute wheel */
+    uinput_abs_setup = (struct uinput_abs_setup){
+        .code = ABS_WHEEL,
+        .absinfo = {
+            .value = 0,
+            .minimum = 0,
+            .maximum = 71,
+        },
+    };
+    LIBC_GUARD(ioctl(fd, UI_ABS_SETUP, &uinput_abs_setup),
+               "setup absolute wheel");
+
+    /* Setup device */
+    /* Pose as 056a:0314 Wacom Co., Ltd PTH-451 [Intuos pro (S)] */
+    uinput_setup = (struct uinput_setup){
+        .id = {
+            .bustype = BUS_USB,
+            .vendor = 0x056a,
+            .product = 0x0314,
+            .version = 0x0110,
+        },
+        .name = "Wacom Intuos Pro S Pad",
+    };
+    LIBC_GUARD(ioctl(fd, UI_DEV_SETUP, &uinput_setup),
+               "setup uinput device");
+
+    /* Create device */
+    LIBC_GUARD(ioctl(fd, UI_DEV_CREATE), "create uinput device");
+
+    result = fd;
+    fd = -1;
+
+cleanup:
+
+    if (fd >= 0) {
+        close(fd);
+    }
+
+    return result;
+}
+
 static void LIBUSB_CALL
 interrupt_transfer_cb(struct libusb_transfer *transfer)
 {
@@ -371,6 +491,7 @@ main(void)
     uint8_t *buf = NULL;
     size_t len = 0;
     int pen_fd = -1;
+    int pad_fd = -1;
 
     /* Create libusb context */
     LIBUSB_GUARD(libusb_init(&ctx), "create libusb context");
@@ -532,6 +653,12 @@ main(void)
             FAILURE_CLEANUP("create uinput pen device");
         }
 
+        /* Create uinput pad device */
+        pad_fd = uinput_create_pad();
+        if (pad_fd < 0) {
+            FAILURE_CLEANUP("create uinput pad device");
+        }
+
         /* Allocate transfer buffer */
         len = 0x40;
         buf = malloc(len);
@@ -569,9 +696,8 @@ main(void)
     result = 0;
 cleanup:
 
-    if (pen_fd >= 0) {
-        uinput_destroy(pen_fd);
-    }
+    uinput_destroy(pad_fd);
+    uinput_destroy(pen_fd);
 
     libusb_free_transfer(transfer);
 
