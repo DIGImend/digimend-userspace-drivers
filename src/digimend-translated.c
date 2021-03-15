@@ -113,6 +113,188 @@ translate(int fd, const uint8_t *buf, size_t len)
     send(fd, EV_SYN, SYN_REPORT, 1);
 }
 
+/**
+ * Destroy a uinput device.
+ *
+ * @param fd    The file descriptor of the uinput device to destroy.
+ */
+static void
+uinput_destroy(int fd)
+{
+    if (fd >= 0) {
+        ioctl(fd, UI_DEV_DESTROY);
+        close(fd);
+    }
+}
+
+/**
+ * Create a uinput pen device.
+ *
+ * @return The file descriptor of the created device, or -1 on failure.
+ */
+static int
+uinput_create_pen(void)
+{
+    int result = -1;
+    int fd = -1;
+    struct uinput_abs_setup uinput_abs_setup;
+    struct uinput_setup uinput_setup;
+
+    /* Open the file */
+    fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
+    if (fd < 0) {
+        LIBC_FAILURE_CLEANUP(errno, "open /dev/uinput");
+    }
+
+#define SET_EVBIT(_bit_token) \
+LIBC_GUARD(ioctl(fd, UI_SET_EVBIT, _bit_token),  \
+           "enable uinput %s", #_bit_token)
+    SET_EVBIT(EV_SYN);
+    SET_EVBIT(EV_KEY);
+    SET_EVBIT(EV_REL);
+    SET_EVBIT(EV_ABS);
+    SET_EVBIT(EV_MSC);
+#undef SET_EVBIT
+
+#define SET_KEYBIT(_bit_token) \
+LIBC_GUARD(ioctl(fd, UI_SET_KEYBIT, _bit_token),  \
+           "enable uinput %s", #_bit_token)
+    SET_KEYBIT(BTN_LEFT);
+    SET_KEYBIT(BTN_RIGHT);
+    SET_KEYBIT(BTN_MIDDLE);
+    SET_KEYBIT(BTN_SIDE);
+    SET_KEYBIT(BTN_EXTRA);
+    SET_KEYBIT(BTN_TOOL_PEN);
+    SET_KEYBIT(BTN_TOOL_RUBBER);
+    SET_KEYBIT(BTN_TOOL_BRUSH);
+    SET_KEYBIT(BTN_TOOL_PENCIL);
+    SET_KEYBIT(BTN_TOOL_AIRBRUSH);
+    SET_KEYBIT(BTN_TOOL_MOUSE);
+    SET_KEYBIT(BTN_TOOL_LENS);
+    SET_KEYBIT(BTN_TOUCH);
+    SET_KEYBIT(BTN_STYLUS);
+    SET_KEYBIT(BTN_STYLUS2);
+#undef SET_KEYBIT
+
+#define SET_ABSBIT(_bit_token) \
+LIBC_GUARD(ioctl(fd, UI_SET_ABSBIT, _bit_token),  \
+           "enable uinput %s", #_bit_token)
+    SET_ABSBIT(ABS_X);
+    SET_ABSBIT(ABS_Y);
+    SET_ABSBIT(ABS_Z);
+    SET_ABSBIT(ABS_RZ);
+    SET_ABSBIT(ABS_THROTTLE);
+    SET_ABSBIT(ABS_WHEEL);
+    SET_ABSBIT(ABS_PRESSURE);
+    SET_ABSBIT(ABS_DISTANCE);
+    SET_ABSBIT(ABS_TILT_X);
+    SET_ABSBIT(ABS_TILT_Y);
+    SET_ABSBIT(ABS_MISC);
+#undef SET_ABSBIT
+
+#define SET_RELBIT(_bit_token) \
+LIBC_GUARD(ioctl(fd, UI_SET_RELBIT, _bit_token),  \
+           "enable uinput %s", #_bit_token)
+    SET_RELBIT(REL_WHEEL);
+#undef SET_RELBIT
+
+#define SET_MSCBIT(_bit_token) \
+LIBC_GUARD(ioctl(fd, UI_SET_MSCBIT, _bit_token),  \
+           "enable uinput %s", #_bit_token)
+    SET_MSCBIT(MSC_SERIAL);
+#undef SET_MSCBIT
+
+    /* Setup X axis */
+    uinput_abs_setup = (struct uinput_abs_setup){
+        .code = ABS_X,
+        .absinfo = {
+            .value = 0,
+            .minimum = 0,
+            .maximum = 50800,
+            .resolution = 200,
+        },
+    };
+    LIBC_GUARD(ioctl(fd, UI_ABS_SETUP, &uinput_abs_setup),
+               "setup X axis");
+
+    /* Setup Y axis */
+    uinput_abs_setup = (struct uinput_abs_setup){
+        .code = ABS_Y,
+        .absinfo = {
+            .value = 0,
+            .minimum = 0,
+            .maximum = 31750,
+            .resolution = 200,
+        },
+    };
+    LIBC_GUARD(ioctl(fd, UI_ABS_SETUP, &uinput_abs_setup),
+               "setup Y axis");
+
+    /* Setup pressure axis */
+    uinput_abs_setup = (struct uinput_abs_setup){
+        .code = ABS_PRESSURE,
+        .absinfo = {
+            .value = 0,
+            .minimum = 0,
+            .maximum = 8191,
+        },
+    };
+    LIBC_GUARD(ioctl(fd, UI_ABS_SETUP, &uinput_abs_setup),
+               "setup pressure axis");
+
+    /* Setup tilt X axis */
+    uinput_abs_setup = (struct uinput_abs_setup){
+        .code = ABS_TILT_X,
+        .absinfo = {
+            .value = 0,
+            .minimum = -60,
+            .maximum = 60,
+        },
+    };
+    LIBC_GUARD(ioctl(fd, UI_ABS_SETUP, &uinput_abs_setup),
+               "setup tilt X axis");
+
+    /* Setup tilt Y axis */
+    uinput_abs_setup = (struct uinput_abs_setup){
+        .code = ABS_TILT_Y,
+        .absinfo = {
+            .value = 0,
+            .minimum = -60,
+            .maximum = 60,
+        },
+    };
+    LIBC_GUARD(ioctl(fd, UI_ABS_SETUP, &uinput_abs_setup),
+               "setup tilt Y axis");
+
+    /* Setup device */
+    /* Pose as 056a:0314 Wacom Co., Ltd PTH-451 [Intuos pro (S)] */
+    uinput_setup = (struct uinput_setup){
+        .id = {
+            .bustype = BUS_USB,
+            .vendor = 0x056a,
+            .product = 0x0314,
+            .version = 0x0110,
+        },
+        .name = "Wacom Intuos Pro S Pen",
+    };
+    LIBC_GUARD(ioctl(fd, UI_DEV_SETUP, &uinput_setup),
+               "setup uinput device");
+
+    /* Create device */
+    LIBC_GUARD(ioctl(fd, UI_DEV_CREATE), "create uinput device");
+
+    result = fd;
+    fd = -1;
+
+cleanup:
+
+    if (fd >= 0) {
+        close(fd);
+    }
+
+    return result;
+}
+
 static void LIBUSB_CALL
 interrupt_transfer_cb(struct libusb_transfer *transfer)
 {
@@ -188,10 +370,7 @@ main(void)
     struct libusb_transfer *transfer = NULL;
     uint8_t *buf = NULL;
     size_t len = 0;
-    int uinput_fd = -1;
-    struct uinput_abs_setup uinput_abs_setup;
-    struct uinput_setup uinput_setup;
-    bool device_created = false;
+    int pen_fd = -1;
 
     /* Create libusb context */
     LIBUSB_GUARD(libusb_init(&ctx), "create libusb context");
@@ -347,149 +526,11 @@ main(void)
             LIBUSB_FAILURE_CLEANUP(err, "set infinite idle on interface 1");
         }
 
-        /* Open uinput */
-        uinput_fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
-        if (uinput_fd < 0) {
-            LIBC_FAILURE_CLEANUP(errno, "open /dev/uinput");
+        /* Create uinput pen device */
+        pen_fd = uinput_create_pen();
+        if (pen_fd < 0) {
+            FAILURE_CLEANUP("create uinput pen device");
         }
-
-#define SET_EVBIT(_bit_token) \
-    LIBC_GUARD(ioctl(uinput_fd, UI_SET_EVBIT, _bit_token),  \
-               "enable uinput %s", #_bit_token)
-        SET_EVBIT(EV_SYN);
-        SET_EVBIT(EV_KEY);
-        SET_EVBIT(EV_REL);
-        SET_EVBIT(EV_ABS);
-        SET_EVBIT(EV_MSC);
-#undef SET_EVBIT
-
-#define SET_KEYBIT(_bit_token) \
-    LIBC_GUARD(ioctl(uinput_fd, UI_SET_KEYBIT, _bit_token),  \
-               "enable uinput %s", #_bit_token)
-        SET_KEYBIT(BTN_LEFT);
-        SET_KEYBIT(BTN_RIGHT);
-        SET_KEYBIT(BTN_MIDDLE);
-        SET_KEYBIT(BTN_SIDE);
-        SET_KEYBIT(BTN_EXTRA);
-        SET_KEYBIT(BTN_TOOL_PEN);
-        SET_KEYBIT(BTN_TOOL_RUBBER);
-        SET_KEYBIT(BTN_TOOL_BRUSH);
-        SET_KEYBIT(BTN_TOOL_PENCIL);
-        SET_KEYBIT(BTN_TOOL_AIRBRUSH);
-        SET_KEYBIT(BTN_TOOL_MOUSE);
-        SET_KEYBIT(BTN_TOOL_LENS);
-        SET_KEYBIT(BTN_TOUCH);
-        SET_KEYBIT(BTN_STYLUS);
-        SET_KEYBIT(BTN_STYLUS2);
-#undef SET_KEYBIT
-
-#define SET_ABSBIT(_bit_token) \
-    LIBC_GUARD(ioctl(uinput_fd, UI_SET_ABSBIT, _bit_token),  \
-               "enable uinput %s", #_bit_token)
-        SET_ABSBIT(ABS_X);
-        SET_ABSBIT(ABS_Y);
-        SET_ABSBIT(ABS_Z);
-        SET_ABSBIT(ABS_RZ);
-        SET_ABSBIT(ABS_THROTTLE);
-        SET_ABSBIT(ABS_WHEEL);
-        SET_ABSBIT(ABS_PRESSURE);
-        SET_ABSBIT(ABS_DISTANCE);
-        SET_ABSBIT(ABS_TILT_X);
-        SET_ABSBIT(ABS_TILT_Y);
-        SET_ABSBIT(ABS_MISC);
-#undef SET_ABSBIT
-
-#define SET_RELBIT(_bit_token) \
-    LIBC_GUARD(ioctl(uinput_fd, UI_SET_RELBIT, _bit_token),  \
-               "enable uinput %s", #_bit_token)
-        SET_RELBIT(REL_WHEEL);
-#undef SET_RELBIT
-
-#define SET_MSCBIT(_bit_token) \
-    LIBC_GUARD(ioctl(uinput_fd, UI_SET_MSCBIT, _bit_token),  \
-               "enable uinput %s", #_bit_token)
-        SET_MSCBIT(MSC_SERIAL);
-#undef SET_MSCBIT
-
-        /* Setup X axis */
-        uinput_abs_setup = (struct uinput_abs_setup){
-            .code = ABS_X,
-            .absinfo = {
-                .value = 0,
-                .minimum = 0,
-                .maximum = 50800,
-                .resolution = 200,
-            },
-        };
-        LIBC_GUARD(ioctl(uinput_fd, UI_ABS_SETUP, &uinput_abs_setup),
-                   "setup X axis");
-
-        /* Setup Y axis */
-        uinput_abs_setup = (struct uinput_abs_setup){
-            .code = ABS_Y,
-            .absinfo = {
-                .value = 0,
-                .minimum = 0,
-                .maximum = 31750,
-                .resolution = 200,
-            },
-        };
-        LIBC_GUARD(ioctl(uinput_fd, UI_ABS_SETUP, &uinput_abs_setup),
-                   "setup Y axis");
-
-        /* Setup pressure axis */
-        uinput_abs_setup = (struct uinput_abs_setup){
-            .code = ABS_PRESSURE,
-            .absinfo = {
-                .value = 0,
-                .minimum = 0,
-                .maximum = 8191,
-            },
-        };
-        LIBC_GUARD(ioctl(uinput_fd, UI_ABS_SETUP, &uinput_abs_setup),
-                   "setup pressure axis");
-
-        /* Setup tilt X axis */
-        uinput_abs_setup = (struct uinput_abs_setup){
-            .code = ABS_TILT_X,
-            .absinfo = {
-                .value = 0,
-                .minimum = -60,
-                .maximum = 60,
-            },
-        };
-        LIBC_GUARD(ioctl(uinput_fd, UI_ABS_SETUP, &uinput_abs_setup),
-                   "setup tilt X axis");
-
-        /* Setup tilt Y axis */
-        uinput_abs_setup = (struct uinput_abs_setup){
-            .code = ABS_TILT_Y,
-            .absinfo = {
-                .value = 0,
-                .minimum = -60,
-                .maximum = 60,
-            },
-        };
-        LIBC_GUARD(ioctl(uinput_fd, UI_ABS_SETUP, &uinput_abs_setup),
-                   "setup tilt Y axis");
-
-        /* Setup uinput device */
-        /* Pose as 056a:0314 Wacom Co., Ltd PTH-451 [Intuos pro (S)] */
-        uinput_setup = (struct uinput_setup){
-            .id = {
-                .bustype = BUS_USB,
-                .vendor = 0x056a,
-                .product = 0x0314,
-                .version = 0x0110,
-            },
-            .name = "Wacom Intuos Pro S Pen",
-        };
-        LIBC_GUARD(ioctl(uinput_fd, UI_DEV_SETUP, &uinput_setup),
-                   "setup uinput device");
-
-        /* Create uinput device */
-        LIBC_GUARD(ioctl(uinput_fd, UI_DEV_CREATE), "create uinput device");
-        device_created = true;
 
         /* Allocate transfer buffer */
         len = 0x40;
@@ -508,7 +549,7 @@ main(void)
                                        buf, len,
                                        interrupt_transfer_cb,
                                        /* Callback data */
-                                       &uinput_fd,
+                                       &pen_fd,
                                        /* Timeout */
                                        0);
 
@@ -528,12 +569,8 @@ main(void)
     result = 0;
 cleanup:
 
-    if (device_created) {
-        ioctl(uinput_fd, UI_DEV_DESTROY);
-    }
-
-    if (uinput_fd >= 0) {
-        close(uinput_fd);
+    if (pen_fd >= 0) {
+        uinput_destroy(pen_fd);
     }
 
     libusb_free_transfer(transfer);
