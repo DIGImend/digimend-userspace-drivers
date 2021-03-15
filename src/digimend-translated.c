@@ -419,28 +419,46 @@ translate(const struct fds *fds, const uint8_t *buf, size_t len)
     if (buf[0] != 8) {
         return;
     }
-    if (buf[1] & 0x80) {
-        uinput_send(fds->pen, EV_ABS, ABS_X,
-                    (int32_t)buf[2] |
-                    ((int32_t)buf[3] << 8) |
-                    ((int32_t)buf[8] << 16));
-        uinput_send(fds->pen, EV_ABS, ABS_Y,
-                    (int32_t)buf[4] |
-                    ((int32_t)buf[5] << 8) |
-                    ((int32_t)buf[9] << 16));
-        uinput_send(fds->pen, EV_ABS, ABS_PRESSURE,
-                    (int32_t)buf[6] | ((int32_t)buf[7] << 8));
-        uinput_send(fds->pen, EV_ABS, ABS_TILT_X, (int8_t)buf[10]);
-        uinput_send(fds->pen, EV_ABS, ABS_TILT_Y, -(int8_t)buf[11]);
-        uinput_send(fds->pen, EV_KEY, BTN_TOOL_PEN, 1);
-        uinput_send(fds->pen, EV_KEY, BTN_TOUCH, (buf[1] & 1) != 0);
-        uinput_send(fds->pen, EV_KEY, BTN_STYLUS, (buf[1] & 2) != 0);
-        uinput_send(fds->pen, EV_KEY, BTN_STYLUS2, (buf[1] & 4) != 0);
-    } else {
-        uinput_send(fds->pen, EV_KEY, BTN_TOOL_PEN, 0);
+    /* If it's a pen report */
+    if ((buf[1] & 0x70) == 0) {
+        /* If pen is in range */
+        if (buf[1] & 0x80) {
+            uinput_send(fds->pen, EV_ABS, ABS_X,
+                        (int32_t)buf[2] |
+                        ((int32_t)buf[3] << 8) |
+                        ((int32_t)buf[8] << 16));
+            uinput_send(fds->pen, EV_ABS, ABS_Y,
+                        (int32_t)buf[4] |
+                        ((int32_t)buf[5] << 8) |
+                        ((int32_t)buf[9] << 16));
+            uinput_send(fds->pen, EV_ABS, ABS_PRESSURE,
+                        (int32_t)buf[6] | ((int32_t)buf[7] << 8));
+            uinput_send(fds->pen, EV_ABS, ABS_TILT_X, (int8_t)buf[10]);
+            uinput_send(fds->pen, EV_ABS, ABS_TILT_Y, -(int8_t)buf[11]);
+            uinput_send(fds->pen, EV_KEY, BTN_TOOL_PEN, 1);
+            uinput_send(fds->pen, EV_KEY, BTN_TOUCH, (buf[1] & 1) != 0);
+            uinput_send(fds->pen, EV_KEY, BTN_STYLUS, (buf[1] & 2) != 0);
+            uinput_send(fds->pen, EV_KEY, BTN_STYLUS2, (buf[1] & 4) != 0);
+        } else {
+            uinput_send(fds->pen, EV_KEY, BTN_TOOL_PEN, 0);
+        }
+        uinput_send(fds->pen, EV_MSC, MSC_SERIAL, 1098942556);
+        uinput_send(fds->pen, EV_SYN, SYN_REPORT, 1);
+    /* If it's a frame button report */
+    } else if (buf[1] == 0xe0) {
+        uint16_t btn_mask = buf[4] | (buf[5] << 8);
+        static const int32_t btn_codes[sizeof(btn_mask) * 8] = {
+            BTN_0, BTN_1, BTN_2, BTN_3,
+            BTN_4, BTN_5, BTN_6, BTN_7,
+            BTN_8, BTN_9, BTN_A, BTN_B,
+            BTN_C, BTN_X, BTN_Y, BTN_Z,
+        };
+        size_t i;
+        for (i = 0; i < (sizeof(btn_mask) * 8); btn_mask >>= 1, i++) {
+            uinput_send(fds->pad, EV_KEY, btn_codes[i], btn_mask & 1);
+        }
+        uinput_send(fds->pad, EV_SYN, SYN_REPORT, 1);
     }
-    uinput_send(fds->pen, EV_MSC, MSC_SERIAL, 1098942556);
-    uinput_send(fds->pen, EV_SYN, SYN_REPORT, 1);
 }
 
 
