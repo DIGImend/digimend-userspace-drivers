@@ -399,9 +399,20 @@ uinput_send(int fd, uint16_t type, uint16_t code, int32_t value)
 }
 
 
+/** The collection of uinput device fds corresponding to a tablet */
+struct fds {
+    int pen;
+    int pad;
+};
+
+
 static void
-translate(int fd, const uint8_t *buf, size_t len)
+translate(const struct fds *fds, const uint8_t *buf, size_t len)
 {
+    assert(fds != NULL);
+    assert(fds->pen >= 0);
+    assert(fds->pad >= 0);
+
     if (len < 12) {
         return;
     }
@@ -409,27 +420,27 @@ translate(int fd, const uint8_t *buf, size_t len)
         return;
     }
     if (buf[1] & 0x80) {
-        uinput_send(fd, EV_ABS, ABS_X,
+        uinput_send(fds->pen, EV_ABS, ABS_X,
                     (int32_t)buf[2] |
                     ((int32_t)buf[3] << 8) |
                     ((int32_t)buf[8] << 16));
-        uinput_send(fd, EV_ABS, ABS_Y,
+        uinput_send(fds->pen, EV_ABS, ABS_Y,
                     (int32_t)buf[4] |
                     ((int32_t)buf[5] << 8) |
                     ((int32_t)buf[9] << 16));
-        uinput_send(fd, EV_ABS, ABS_PRESSURE,
+        uinput_send(fds->pen, EV_ABS, ABS_PRESSURE,
                     (int32_t)buf[6] | ((int32_t)buf[7] << 8));
-        uinput_send(fd, EV_ABS, ABS_TILT_X, (int8_t)buf[10]);
-        uinput_send(fd, EV_ABS, ABS_TILT_Y, -(int8_t)buf[11]);
-        uinput_send(fd, EV_KEY, BTN_TOOL_PEN, 1);
-        uinput_send(fd, EV_KEY, BTN_TOUCH, (buf[1] & 1) != 0);
-        uinput_send(fd, EV_KEY, BTN_STYLUS, (buf[1] & 2) != 0);
-        uinput_send(fd, EV_KEY, BTN_STYLUS2, (buf[1] & 4) != 0);
+        uinput_send(fds->pen, EV_ABS, ABS_TILT_X, (int8_t)buf[10]);
+        uinput_send(fds->pen, EV_ABS, ABS_TILT_Y, -(int8_t)buf[11]);
+        uinput_send(fds->pen, EV_KEY, BTN_TOOL_PEN, 1);
+        uinput_send(fds->pen, EV_KEY, BTN_TOUCH, (buf[1] & 1) != 0);
+        uinput_send(fds->pen, EV_KEY, BTN_STYLUS, (buf[1] & 2) != 0);
+        uinput_send(fds->pen, EV_KEY, BTN_STYLUS2, (buf[1] & 4) != 0);
     } else {
-        uinput_send(fd, EV_KEY, BTN_TOOL_PEN, 0);
+        uinput_send(fds->pen, EV_KEY, BTN_TOOL_PEN, 0);
     }
-    uinput_send(fd, EV_MSC, MSC_SERIAL, 1098942556);
-    uinput_send(fd, EV_SYN, SYN_REPORT, 1);
+    uinput_send(fds->pen, EV_MSC, MSC_SERIAL, 1098942556);
+    uinput_send(fds->pen, EV_SYN, SYN_REPORT, 1);
 }
 
 
@@ -437,12 +448,12 @@ static void LIBUSB_CALL
 interrupt_transfer_cb(struct libusb_transfer *transfer)
 {
     enum libusb_error err;
-    int uinput_fd;
+    const struct fds *fds;
 
     assert(transfer != NULL);
     assert(transfer->user_data != NULL);
 
-    uinput_fd = *(const int *)transfer->user_data;
+    fds = (const struct fds *)transfer->user_data;
 
     switch (transfer->status)
     {
@@ -456,7 +467,7 @@ interrupt_transfer_cb(struct libusb_transfer *transfer)
             fprintf(stderr, "\n");
 #endif
             /* Translate */
-            translate(uinput_fd, transfer->buffer, transfer->actual_length);
+            translate(fds, transfer->buffer, transfer->actual_length);
             /* Resubmit the transfer */
             err = libusb_submit_transfer(transfer);
             if (err != LIBUSB_SUCCESS) {
@@ -508,8 +519,7 @@ main(void)
     struct libusb_transfer *transfer = NULL;
     uint8_t *buf = NULL;
     size_t len = 0;
-    int pen_fd = -1;
-    int pad_fd = -1;
+    struct fds fds = {.pen = -1, .pad = -1};
 
     /* Create libusb context */
     LIBUSB_GUARD(libusb_init(&ctx), "create libusb context");
@@ -666,14 +676,14 @@ main(void)
         }
 
         /* Create uinput pen device */
-        pen_fd = uinput_create_pen();
-        if (pen_fd < 0) {
+        fds.pen = uinput_create_pen();
+        if (fds.pen < 0) {
             FAILURE_CLEANUP("create uinput pen device");
         }
 
         /* Create uinput pad device */
-        pad_fd = uinput_create_pad();
-        if (pad_fd < 0) {
+        fds.pad = uinput_create_pad();
+        if (fds.pad < 0) {
             FAILURE_CLEANUP("create uinput pad device");
         }
 
@@ -694,7 +704,7 @@ main(void)
                                        buf, len,
                                        interrupt_transfer_cb,
                                        /* Callback data */
-                                       &pen_fd,
+                                       &fds,
                                        /* Timeout */
                                        0);
 
@@ -714,8 +724,8 @@ main(void)
     result = 0;
 cleanup:
 
-    uinput_destroy(pad_fd);
-    uinput_destroy(pen_fd);
+    uinput_destroy(fds.pad);
+    uinput_destroy(fds.pen);
 
     libusb_free_transfer(transfer);
 
