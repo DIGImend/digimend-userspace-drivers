@@ -346,6 +346,18 @@ LIBC_GUARD(ioctl(fd, UI_SET_ABSBIT, _bit_token),  \
     LIBC_GUARD(ioctl(fd, UI_ABS_SETUP, &uinput_abs_setup),
                "setup absolute wheel");
 
+    /* Setup misc axis */
+    uinput_abs_setup = (struct uinput_abs_setup){
+        .code = ABS_MISC,
+        .absinfo = {
+            .value = 0,
+            .minimum = 0,
+            .maximum = 0,
+        },
+    };
+    LIBC_GUARD(ioctl(fd, UI_ABS_SETUP, &uinput_abs_setup),
+               "setup misc axis");
+
     /* Setup device */
     /* Pose as 056a:0314 Wacom Co., Ltd PTH-451 [Intuos pro (S)] */
     uinput_setup = (struct uinput_setup){
@@ -444,7 +456,7 @@ translate(const struct fds *fds, const uint8_t *buf, size_t len)
         }
         uinput_send(fds->pen, EV_MSC, MSC_SERIAL, 1098942556);
         uinput_send(fds->pen, EV_SYN, SYN_REPORT, 1);
-    /* If it's a frame button report */
+    /* Else, if it's a frame button report */
     } else if (buf[1] == 0xe0) {
         uint16_t btn_mask = buf[4] | (buf[5] << 8);
         static const int32_t btn_codes[sizeof(btn_mask) * 8] = {
@@ -454,9 +466,19 @@ translate(const struct fds *fds, const uint8_t *buf, size_t len)
             BTN_C, BTN_X, BTN_Y, BTN_Z,
         };
         size_t i;
+        uinput_send(fds->pad, EV_ABS, ABS_MISC, btn_mask ? 15 : 0);
         for (i = 0; i < (sizeof(btn_mask) * 8); btn_mask >>= 1, i++) {
             uinput_send(fds->pad, EV_KEY, btn_codes[i], btn_mask & 1);
         }
+        uinput_send(fds->pad, EV_SYN, SYN_REPORT, 1);
+    /* Else, if it's a touch dial report */
+    } else if (buf[1] == 0xf0) {
+        int32_t value = buf[5];
+        if (value != 0) {
+            value = (value > 6 ? (19 - value) : (7 - value)) * 71 / 12;
+        }
+        uinput_send(fds->pad, EV_ABS, ABS_MISC, value ? 15 : 0);
+        uinput_send(fds->pad, EV_ABS, ABS_WHEEL, value);
         uinput_send(fds->pad, EV_SYN, SYN_REPORT, 1);
     }
 }
