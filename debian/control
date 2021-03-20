@@ -1,0 +1,17 @@
+Source: digimend-userspace-drivers
+Section: libs
+Priority: optional
+Maintainer: Nikolai Kondrashov <spbnick@gmail.com>
+Build-Depends: debhelper-compat (= 13), autotools-dev, pkg-config, libusb-1.0-0-dev
+Standards-Version: 4.5.1
+Homepage: https://github.com/DIGImend/digimend-userspace-drivers/
+Vcs-Browser: https://github.com/DIGImend/digimend-userspace-drivers/
+Vcs-Git: https://github.com/DIGImend/digimend-userspace-drivers.git
+Rules-Requires-Root: no
+
+Package: digimend-userspace-drivers
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Userspace drivers and tools for various graphics tablets
+ Digimend-userspace-drivers is a collection of userspace drivers and tools
+ making various graphics tablets work on Linux.

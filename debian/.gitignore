@@ -1,0 +1,8 @@
+/files
+/digimend-userspace-drivers.debhelper.log
+/digimend-userspace-drivers.substvars
+/digimend-userspace-drivers
+/.debhelper
+/autoreconf.after
+/autoreconf.before
+/debhelper-build-stamp
