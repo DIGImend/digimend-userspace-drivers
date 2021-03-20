@@ -5,3 +5,4 @@
 # This file is part of digimend-userspace-drivers.
 
 SUBDIRS = include lib src
+dist_doc_DATA = README.md
