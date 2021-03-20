@@ -12,6 +12,7 @@
 /stamp-h1
 .deps
 Makefile
+*.tar.gz
 *.in
 *.o
 *.swo
