@@ -6,3 +6,4 @@
 
 SUBDIRS = include lib src
 dist_doc_DATA = README.md
+dist_noinst_DATA = digimend-userspace-drivers.spec
