@@ -5,6 +5,7 @@
 /config.log
 /config.status
 /configure
+/cscope.out
 /depcomp
 /install-sh
 /missing
@@ -15,3 +16,4 @@ Makefile
 *.o
 *.swo
 *.swp
+*~
