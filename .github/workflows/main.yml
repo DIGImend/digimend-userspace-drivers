@@ -1,0 +1,29 @@
+name: main
+
+on:
+  push:
+	branches: [main]
+  pull_request:
+	branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: autoreconf
+        run: autoreconf -ivf
+      - name: configure
+        run: ./configure --enable-debug
+      - name: make
+        run: make
+      - name: make check
+        run: make check
+      - name: make distcheck
+        run: make distcheck
+      - name: upload tarball
+        uses: actions/upload-artifact@v2.2.2
+        with:
+          path: "*.tar.gz"
+          if-no-files-found: error
