@@ -2,7 +2,7 @@ Source: digimend-userspace-drivers
 Section: libs
 Priority: optional
 Maintainer: Nikolai Kondrashov <spbnick@gmail.com>
-Build-Depends: debhelper-compat (= 13), autotools-dev, pkg-config, libusb-1.0-0-dev
+Build-Depends: debhelper-compat (= 12), autoconf-archive, pkg-config, libusb-1.0-0-dev
 Standards-Version: 4.5.1
 Homepage: https://github.com/DIGImend/digimend-userspace-drivers/
 Vcs-Browser: https://github.com/DIGImend/digimend-userspace-drivers/
