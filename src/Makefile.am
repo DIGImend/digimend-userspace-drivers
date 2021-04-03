@@ -7,7 +7,7 @@
 AM_CFLAGS = $(WARN_CFLAGS)
 AM_LDFLAGS = $(WARN_LDFLAGS)
 
-bin_PROGRAMS = digimend-translate
+bin_PROGRAMS = dud-translate
 
-digimend_translate_SOURCES = \
-    digimend-translate.c
+dud_translate_SOURCES = \
+    dud-translate.c
