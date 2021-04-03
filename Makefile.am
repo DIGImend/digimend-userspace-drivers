@@ -4,6 +4,8 @@
 #
 # This file is part of digimend-userspace-drivers.
 
+ACLOCAL_AMFLAGS = -I m4
+
 SUBDIRS = include lib src
 dist_doc_DATA = README.md
 dist_noinst_DATA = digimend-userspace-drivers.spec

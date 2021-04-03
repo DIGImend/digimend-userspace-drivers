@@ -13,6 +13,21 @@ AM_MAINTAINER_MODE
 AC_USE_SYSTEM_EXTENSIONS
 AX_COMPILER_FLAGS()
 AC_CONFIG_HEADERS([config.h])
+AC_CONFIG_MACRO_DIR([m4])
+
+# Setup include paths
+ABS_SRCDIR=`cd ${srcdir}; pwd`
+ABS_BUILDDIR=`pwd`
+CPPFLAGS="-I${ABS_BUILDDIR} -I${ABS_BUILDDIR}/include $CPPFLAGS"
+if test "$ABS_SRCDIR" != "$ABS_BUILDDIR"; then
+    CPPFLAGS="-I${ABS_SRCDIR}/include $CPPFLAGS"
+fi
+
+#
+# Checks for programs.
+#
+AM_PROG_AR
+AC_PROG_LIBTOOL
 
 #
 # Checks for libraries.
