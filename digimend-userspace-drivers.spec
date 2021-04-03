@@ -39,7 +39,7 @@ making various graphics tablets work on Linux.
 %{!?_licensedir:%global license %doc}
 %license COPYING
 %doc %{_defaultdocdir}/%{name}
-%{_bindir}/digimend-translate
+%{_bindir}/dud-translate
 
 %post
 /sbin/ldconfig
